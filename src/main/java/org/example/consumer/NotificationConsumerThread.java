@@ -4,51 +4,61 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.example.config.Config;
+import org.example.data.Call;
 import org.example.redis.CallFilter;
+import org.example.serialize.JsonDeserializer;
 
-import java.util.Arrays;
+import java.time.Duration;
+
+import java.util.List;
+
 import java.util.Properties;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class NotificationConsumerThread implements Runnable {
+public class NotificationConsumerThread {
 
-    private final KafkaConsumer<String, String> consumer;
-    private final String topic;
+    private final KafkaConsumer<String, Call> consumer;
+
     private CallFilter callFilter;
-    public NotificationConsumerThread(String brokers, String groupId, String topic) {
-        Properties prop = createConsumerConfig(brokers, groupId);
+    public NotificationConsumerThread() {
+        Properties prop = createConsumerConfig();
         this.consumer = new KafkaConsumer<>(prop);
-        this.topic = topic;
-        this.consumer.subscribe(Arrays.asList(this.topic));
+        this.consumer.subscribe(List.of(Config.CONSUMER_TOPIC));
     }
 
-    private static Properties createConsumerConfig(String brokers, String groupId) {
+    private static Properties createConsumerConfig() {
         Properties props = new Properties();
-        props.put("bootstrap.servers", brokers);
-        props.put("group.id", groupId);
-        props.put("enable.auto.commit", "true");
-        props.put("auto.commit.interval.ms", "1000");
-        props.put("session.timeout.ms", "30000");
-        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,"50");
-        props.put("auto.offset.reset", "earliest");
-        props.put("key.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
-        props.put("value.deserializer", "org.apache.kafka.common.serialization.StringDeserializer");
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, Config.BROKER);
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, Config.GROUP_ID);
+        props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, true);
+        props.put(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG, 1000);
+        props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, 30000);
+        props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG,Config.MESSAGES_POLL);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        props.put(JsonDeserializer.VALUE_CLASS_NAME_CONFIG, Call.class);
+
+
         return props;
     }
 
-    @Override
+
     public void run() {
         callFilter = CallFilter.getInstance();
+        ExecutorService executorService = Executors.newFixedThreadPool(Config.NUMBER_OF_THREAD_PER_CONSUMER);
         while (true) {
-            ConsumerRecords<String, String> records = consumer.poll(100);
-            for (ConsumerRecord<String, String> record : records) {
-                try {
+            ConsumerRecords<String, Call> records = consumer.poll(Duration.ofMillis(100));
+
+            for (ConsumerRecord<String, Call> record : records) {
+                executorService.submit(()->{
                     callFilter.handleCall(record.value());
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                });
             }
+
         }
     }
-
-
 }

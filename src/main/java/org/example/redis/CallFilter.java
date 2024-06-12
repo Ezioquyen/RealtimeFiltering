@@ -1,69 +1,72 @@
 package org.example.redis;
 
 import java.time.Duration;
-import java.util.List;
+import java.time.LocalDate;
+import java.time.ZoneId;
+
+import org.example.data.Response;
+import org.example.producer.Producer;
+import org.example.config.Config;
+import org.example.data.Call;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 
 public class CallFilter {
-    private int count;
     private final JedisPool jedisPool;
     private static CallFilter INSTANCE;
-
+    private Producer producer;
 
     private CallFilter() {
+        producer = Producer.getInstance();
         String redisHost = "localhost";
         int redisPort = 6379;
-        count = 0;
         final JedisPoolConfig poolConfig = buildPoolConfig();
         this.jedisPool= new JedisPool(poolConfig, redisHost, redisPort);
     }
 
     public static CallFilter getInstance() {
-        synchronized (CallFilter.class) {
             if (INSTANCE == null) {
                 System.out.println("check-point");
                 INSTANCE = new CallFilter();
             }
-        }
         return INSTANCE;
     }
 
-    public boolean isCallAllowed(String phoneNumber, int maxCalls, int periodInSeconds) throws InterruptedException {
-        String key = "calls:" + phoneNumber;
-        long currentTime = System.currentTimeMillis() / 1000;
-
-
+    public void handleCall(Call call) {
         try (Jedis jedis = jedisPool.getResource()) {
-            System.out.println("This message from thread " + Thread.currentThread().threadId() + " by " + count++);// thao tác với Redis
-            List<String> timestamps = jedis.lrange(key, 0, -1);
+            String dailyKey = "requests:" + call.getCaller()+ ":" + getCurrentDate();
+            String timestampKey = "last_request:" + call.getCaller();
 
-            List<String> validTimestamps = timestamps.stream()
-                    .filter(ts -> (currentTime - Long.parseLong(ts)) < periodInSeconds)
-                    .toList();
+            long currentTime = System.currentTimeMillis();
 
-            if (validTimestamps.size() >= maxCalls) {
-                return false;
+            long dailyRequests = Long.parseLong(jedis.get(dailyKey));
+            if (dailyRequests == 0) {
+                jedis.expire(dailyKey, 86400);
+            } else if (dailyRequests >= Config.MAX_DAILY_CALL) {
+                producer.response(new Response("Call is not allowed: reached limit",call.getSendTime()),call.getId().toString());
+                System.out.println("Call is not allowed: reached limit");
+                return;
+            } else {
+                String lastRequestTime = jedis.get(timestampKey);
+                if (lastRequestTime != null) {
+                    long lastTime = Long.parseLong(lastRequestTime);
+                    if (currentTime - lastTime < Config.MIN_TIME_INTERVAL) {
+                        producer.response(new Response("Call is not allowed: min time interval must be under " + Config.MIN_TIME_INTERVAL / 1000 + " seconds",call.getSendTime()), call.getId().toString());
+                        System.out.println("Call is not allowed: min time interval must be under " + Config.MIN_TIME_INTERVAL / 1000 + " seconds");
+                        return;
+                    }
+                }
             }
-
-            jedis.lpush(key, String.valueOf(currentTime));
-            jedis.ltrim(key, 0, maxCalls - 1);
-        }
-
-        return true;
-    }
-
-    public void handleCall(String phoneNumber) throws InterruptedException {
-        int maxCalls = 30;
-        int periodInSeconds = 60;
-
-        if (isCallAllowed(phoneNumber, maxCalls, periodInSeconds)) {
+            jedis.incr(dailyKey);
+            jedis.set(timestampKey, String.valueOf(currentTime));
+            producer.response(new Response("Call is allowed",call.getSendTime()),call.getId().toString());
             System.out.println("Call allowed");
-        } else {
-            System.out.println("Not allowed");
+
         }
     }
+
+
     private JedisPoolConfig buildPoolConfig() {
         final JedisPoolConfig poolConfig = new JedisPoolConfig();
         poolConfig.setMaxTotal(128);
@@ -77,6 +80,9 @@ public class CallFilter {
         poolConfig.setNumTestsPerEvictionRun(3);
         poolConfig.setBlockWhenExhausted(true);
         return poolConfig;
+    }
+    private String getCurrentDate() {
+        return LocalDate.now(ZoneId.of("UTC")).toString();
     }
 
 }
