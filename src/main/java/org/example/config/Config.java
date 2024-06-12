@@ -10,7 +10,7 @@ public class Config {
     /*public static final int NUMBER_OF_CONSUMER = 1;*/
     public static final int NUMBER_OF_THREAD_PER_CONSUMER = 10;
     public static final int MESSAGES_POLL = 500;
-    public static final int MAX_DAILY_CALL = 25;
+    public static final int MAX_DAILY_CALL = 10;
     public static final int MIN_TIME_INTERVAL = 30000;
     public static final String PRODUCER_TOPIC = "call-response";
 }

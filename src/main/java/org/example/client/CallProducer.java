@@ -9,9 +9,10 @@ import org.example.data.Call;
 import org.example.serialize.JsonSerializer;
 
 import java.util.*;
+import java.util.stream.IntStream;
 
 
-public class MyProducer {
+public class CallProducer {
 
     public static void main(String[] args) {
 
@@ -23,10 +24,10 @@ public class MyProducer {
         List<String> phoneNumbers = List.of(
                 "0982462855", "0943024933", "0974372733", "0932482393"
         );
-        int numberOfCalls = 10000;
-        Random random = new Random();
-        List<Call> calls = new ArrayList<>();
 
+        List<Call> calls = new ArrayList<>();
+        int numberOfCalls = 5000;
+        Random random = new Random();
         for (int i = 0; i < numberOfCalls; i++) {
             String fromPhoneNumber = phoneNumbers.get(random.nextInt(phoneNumbers.size()));
             String toPhoneNumber;
@@ -34,8 +35,10 @@ public class MyProducer {
                 toPhoneNumber = phoneNumbers.get(random.nextInt(phoneNumbers.size()));
             } while (toPhoneNumber.equals(fromPhoneNumber));
 
-            calls.add(new Call(i, fromPhoneNumber, toPhoneNumber, random.nextInt(3600, 100000),System.currentTimeMillis()));
+            calls.add(new Call(i, fromPhoneNumber, toPhoneNumber, random.nextInt(3600, 100000),0L));
         }
+        IntStream.range(0,100).forEach(_->{calls.add(new Call(5001, "0982462855","0932482393",3600,0L));});
+        Collections.shuffle(calls);
         try (var producer = new KafkaProducer<>(props)) {
 
             calls.parallelStream().forEach(e-> {
@@ -44,6 +47,7 @@ public class MyProducer {
                 } catch (InterruptedException ex) {
                     throw new RuntimeException(ex);
                 }
+                e.setSendTime(System.currentTimeMillis());
                 producer.send(new ProducerRecord<>(Config.CONSUMER_TOPIC, e.getId().toString(), e));});
         }
     }
