@@ -1,5 +1,8 @@
 package org.example.consumer;
 
+import com.codahale.metrics.ConsoleReporter;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.Timer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -15,16 +18,23 @@ import java.time.Duration;
 import java.util.List;
 
 import java.util.Properties;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 
 public class NotificationConsumerThread {
 
     private final KafkaConsumer<String, Call> consumer;
-
-    private CallFilter callFilter;
+    private final Timer timer;
 
     public NotificationConsumerThread() {
+        MetricRegistry metrics = new MetricRegistry();
+        this.timer = metrics.timer("process-timer");
+
+
+        ConsoleReporter reporter = ConsoleReporter.forRegistry(metrics)
+                .convertRatesTo(TimeUnit.SECONDS)
+                .convertDurationsTo(TimeUnit.MILLISECONDS)
+                .build();
+        reporter.start(1, TimeUnit.MINUTES);
         Properties prop = createConsumerConfig();
         this.consumer = new KafkaConsumer<>(prop);
         this.consumer.subscribe(List.of(Config.CONSUMER_TOPIC));
@@ -42,21 +52,26 @@ public class NotificationConsumerThread {
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
         props.put(JsonDeserializer.VALUE_CLASS_NAME_CONFIG, Call.class);
-
-
         return props;
     }
 
 
     public void run() {
-        callFilter = CallFilter.getInstance();
-        ExecutorService executorService = Executors.newFixedThreadPool(Config.NUMBER_OF_THREAD_PER_CONSUMER);
-            while (true) {
-                ConsumerRecords<String, Call> records = consumer.poll(Duration.ofMillis(100));
-                for (ConsumerRecord<String, Call> record : records) {
-                    executorService.submit(() -> callFilter.handleCall(record.value()));
-                }
+        CallFilter callFilter = new CallFilter();
+        ExecutorService executorService = Executors.newCachedThreadPool();
+        while (true) {
+            ConsumerRecords<String, Call> records = consumer.poll(Duration.ofMillis(100));
+            for (ConsumerRecord<String, Call> record : records) {
+                Timer.Context context = timer.time();
+                executorService.submit(() -> {
+                    try {
+                        callFilter.handleCall(record.value());
+                    } finally {
+                        context.stop();
+                    }
+                });
             }
+        }
 
     }
 }

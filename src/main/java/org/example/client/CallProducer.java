@@ -9,47 +9,70 @@ import org.example.data.Call;
 import org.example.serialize.JsonSerializer;
 
 import java.util.*;
-import java.util.stream.IntStream;
 
 
 public class CallProducer {
-
+    public  static volatile int count;
     public static void main(String[] args) {
-
-
         final var props = new Properties();
+        Random random = new Random();
+
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, Config.BROKER);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        List<String> phoneNumbers = List.of(
-                "0982462855", "0943024933", "0974372733", "0932482393"
-        );
+        count = 0;
 
-        List<Call> calls = new ArrayList<>();
-        int numberOfCalls = 5000;
-        Random random = new Random();
-        for (int i = 0; i < numberOfCalls; i++) {
-            String fromPhoneNumber = phoneNumbers.get(random.nextInt(phoneNumbers.size()));
-            String toPhoneNumber;
-            do {
-                toPhoneNumber = phoneNumbers.get(random.nextInt(phoneNumbers.size()));
-            } while (toPhoneNumber.equals(fromPhoneNumber));
 
-            calls.add(new Call(i, fromPhoneNumber, toPhoneNumber, random.nextInt(3600, 100000),0L));
-        }
-        IntStream.range(0,100).forEach(_->{calls.add(new Call(5001, "0982462855","0932482393",3600,0L));});
-        Collections.shuffle(calls);
+        Runtime.getRuntime().addShutdownHook(new Thread(() ->{
+
+            System.out.println(count);}));
+
+        //Call simulator
         try (var producer = new KafkaProducer<>(props)) {
+            while (true) {
+            List<Call> calls = genCall();
+                calls.parallelStream().forEach(e -> {
+                    e.setSendTime(System.currentTimeMillis());
+                    producer.send(new ProducerRecord<>(Config.CONSUMER_TOPIC, e.getId(), e));
+                });
+                count += calls.toArray().length;
+                Thread.sleep(random.nextInt(15));
+            }
 
-            calls.parallelStream().forEach(e-> {
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException ex) {
-                    throw new RuntimeException(ex);
-                }
-                e.setSendTime(System.currentTimeMillis());
-                producer.send(new ProducerRecord<>(Config.CONSUMER_TOPIC, e.getId().toString(), e));});
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
+
+
+
     }
+
+    private static List<Call> genCall() {
+        String[] prefixes = {"090", "091", "092", "093", "094", "095", "096", "097", "098", "099",
+                "080", "081", "082", "083", "084", "085", "086", "087", "088", "089",
+                "070", "071", "072", "073", "074", "075", "076", "077", "078", "079",
+                "050", "051", "052", "053", "054", "055", "056", "057", "058", "059",
+                "030", "031", "032", "033", "034", "035", "036", "037", "038", "039"};
+        Random random = new Random();
+        List<Call> calls = new ArrayList<>();
+        for (int i = 0; i < random.nextInt(100); i++) {
+            String id = UUID.randomUUID().toString();
+
+            String caller;
+            String receiver;
+
+            do {
+                String callerPrefix = prefixes[random.nextInt(prefixes.length)];
+                String receiverPrefix = prefixes[random.nextInt(prefixes.length)];
+                caller = callerPrefix + String.format("%07d", random.nextInt(10000000));
+                receiver = receiverPrefix + String.format("%07d", random.nextInt(10000000));
+            } while (caller.equals(receiver));
+
+            int duration = random.nextInt(30);
+            calls.add(new Call(id, caller, receiver, duration, 0L));
+        }
+        return calls;
+    }
+
 }
 

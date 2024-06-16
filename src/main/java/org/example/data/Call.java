@@ -10,7 +10,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class Call {
-    private Integer id;
+    private String id;
     private String caller;
     private String receiver;
     private Integer duration;

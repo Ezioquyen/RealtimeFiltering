@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 
+
 import org.example.data.Response;
 import org.example.producer.Producer;
 import org.example.config.Config;
@@ -15,48 +16,40 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.JedisPoolConfig;
 import redis.clients.jedis.params.SetParams;
 
+
 public class CallFilter {
-    private static CallFilter INSTANCE;
+
     private final Producer producer;
-   private final  JedisPool jedisPool;
-    private CallFilter() {
-        producer = Producer.getInstance();
+    private final JedisPool jedisPool;
+
+    public CallFilter() {
+        producer = new Producer();
         String redisHost = "localhost";
         int redisPort = 6379;
         final JedisPoolConfig poolConfig = buildPoolConfig();
-        jedisPool = new JedisPool(poolConfig,redisHost,redisPort);
-
+        jedisPool = new JedisPool(poolConfig, redisHost, redisPort);
 
     }
 
-    public static CallFilter getInstance() {
-            if (INSTANCE == null) {
-                System.out.println("check-point");
-                INSTANCE = new CallFilter();
-            }
-        return INSTANCE;
-    }
 
     public void handleCall(Call call) {
 
         try (Jedis jedis = jedisPool.getResource()) {
-            if (acquireLock(call.getCaller(),jedis)) {
+            if (acquireLock(call, jedis)) {
                 String dailyKey = "requests:" + call.getCaller() + ":" + getCurrentDate();
                 long dailyRequests = jedis.incr(dailyKey);
                 if (dailyRequests == 0) {
-                    jedis.expire(dailyKey, getSecondsUntilEndOfDay());
+                    jedis.expire(dailyKey, 30);
                 } else if (dailyRequests >= Config.MAX_DAILY_CALL) {
                     producer.response(new Response("Call is not allowed: reached limit", call.getSendTime()), call.getId().toString());
-                    System.out.println("Call is not allowed: reached limit");
+
                     jedis.decr(dailyKey);
                     return;
                 }
                 producer.response(new Response("Call is allowed", call.getSendTime()), call.getId().toString());
-                System.out.println("Call allowed");
-                return;
             }
-            producer.response(new Response("Call is not allowed: The interval between two calls is " + Config.MIN_TIME_INTERVAL / 1000 + " seconds", call.getSendTime()), call.getId().toString());
-            System.out.println("Call is not allowed: The interval between two calls is 30 seconds " + Config.MIN_TIME_INTERVAL / 1000 + " seconds");
+
+
         }
     }
 
@@ -75,6 +68,7 @@ public class CallFilter {
         poolConfig.setBlockWhenExhausted(true);
         return poolConfig;
     }
+
     private String getCurrentDate() {
         return LocalDate.now(ZoneId.of("UTC")).toString();
     }
@@ -86,12 +80,26 @@ public class CallFilter {
         return ChronoUnit.SECONDS.between(now, endOfDay);
     }
 
-    private boolean acquireLock(String phone, Jedis jedis) {
-        String result = jedis.set(phone,"locked", SetParams.setParams().nx());
-        if("OK".equals(result)){
-            jedis.expire(phone, Config.MIN_TIME_INTERVAL/1000);
-            return true;
-        }
+    private boolean acquireLock(Call call, Jedis jedis) {
+
+        String timeIntervalLock = jedis.set(call.getCaller()+":caller", "locked", SetParams.setParams().nx());
+        jedis.expire(call.getCaller()+":caller", 5);
+        if ("OK".equals(timeIntervalLock)) {
+
+            String receiverLock = jedis.set(call.getCaller()+":receiver", "locked", SetParams.setParams().nx());
+            jedis.expire(call.getReceiver()+":receiver", 5);
+            if ("OK".equals(receiverLock)) {
+                jedis.expire(call.getReceiver()+":receiver", call.getDuration());
+                jedis.expire(call.getCaller()+":caller", Config.MIN_TIME_INTERVAL);
+                return true;
+            } else {
+                producer.response(new Response("Call is not allowed: The receiver is on another call", call.getSendTime()), call.getId());
+                return false;
+            }
+        } else
+            producer.response(new Response("Call is not allowed: The interval between two calls is " + Config.MIN_TIME_INTERVAL + " seconds", call.getSendTime()), call.getId().toString());
         return false;
+
+
     }
 }
