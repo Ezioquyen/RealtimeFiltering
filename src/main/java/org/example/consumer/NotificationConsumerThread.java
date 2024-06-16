@@ -58,7 +58,13 @@ public class NotificationConsumerThread {
 
     public void run() {
         CallFilter callFilter = new CallFilter();
-        ExecutorService executorService = Executors.newCachedThreadPool();
+        ArrayBlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(Config.QUEUE_CAP);
+
+        ThreadPoolExecutor executorService = new ThreadPoolExecutor(Config.AVAILABLE,Config.MAX_THREAD,Config.THREAD_LIFE_TIME,TimeUnit.SECONDS, queue,
+                (_, _) -> {
+                    System.out.println("Task rejected");
+                    consumer.pause(consumer.assignment());
+                });
         while (true) {
             ConsumerRecords<String, Call> records = consumer.poll(Duration.ofMillis(100));
             for (ConsumerRecord<String, Call> record : records) {

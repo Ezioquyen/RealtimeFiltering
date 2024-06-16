@@ -38,7 +38,8 @@ public class CallFilter {
             if (acquireLock(call, jedis)) {
                 String dailyKey = "requests:" + call.getCaller() + ":" + getCurrentDate();
                 long dailyRequests = jedis.incr(dailyKey);
-                if (dailyRequests == 0) {
+                if (dailyRequests == 1) {
+
                     jedis.expire(dailyKey, 30);
                 } else if (dailyRequests >= Config.MAX_DAILY_CALL) {
                     producer.response(new Response("Call is not allowed: reached limit", call.getSendTime()), call.getId().toString());
@@ -86,7 +87,7 @@ public class CallFilter {
         jedis.expire(call.getCaller()+":caller", 5);
         if ("OK".equals(timeIntervalLock)) {
 
-            String receiverLock = jedis.set(call.getCaller()+":receiver", "locked", SetParams.setParams().nx());
+            String receiverLock = jedis.set(call.getReceiver()+":receiver", "locked", SetParams.setParams().nx());
             jedis.expire(call.getReceiver()+":receiver", 5);
             if ("OK".equals(receiverLock)) {
                 jedis.expire(call.getReceiver()+":receiver", call.getDuration());

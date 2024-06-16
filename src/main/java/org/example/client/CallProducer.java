@@ -36,7 +36,7 @@ public class CallProducer {
                     producer.send(new ProducerRecord<>(Config.CONSUMER_TOPIC, e.getId(), e));
                 });
                 count += calls.toArray().length;
-                Thread.sleep(random.nextInt(15));
+                Thread.sleep(random.nextInt(10));
             }
 
         } catch (InterruptedException e) {
@@ -55,7 +55,7 @@ public class CallProducer {
                 "030", "031", "032", "033", "034", "035", "036", "037", "038", "039"};
         Random random = new Random();
         List<Call> calls = new ArrayList<>();
-        for (int i = 0; i < random.nextInt(100); i++) {
+        for (int i = 0; i < random.nextInt(15); i++) {
             String id = UUID.randomUUID().toString();
 
             String caller;
